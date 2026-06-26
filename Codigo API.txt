@@ -1,0 +1,694 @@
+# =========================
+# IMPORTACIONES
+# =========================
+import os
+from typing import Optional, Any, Dict, List
+
+from fastapi import FastAPI, Depends, Request
+from fastapi.middleware.cors import CORSMiddleware
+
+from sqlalchemy import create_engine, text
+
+from pydantic import BaseModel
+
+import ipaddress
+
+# =========================
+# CONFIGURACIÓN MYSQL
+# =========================
+DB_HOST = os.environ.get("DB_HOST", "mysql-home")
+DB_NAME = os.environ.get("DB_NAME", "home_monitor")
+DB_USER = os.environ.get("DB_USER", "monitor")
+DB_PASS = os.environ.get("DB_PASS", "monitor_pass")
+
+engine = create_engine(
+	f"mysql+mysqlconnector://{DB_USER}:{DB_PASS}@{DB_HOST}/{DB_NAME}",
+	pool_pre_ping=True
+)
+
+# =========================
+# FASTAPI
+# =========================
+app = FastAPI(
+	title="Home Monitor API"
+)
+
+# =========================
+# CORS
+# =========================
+app.add_middleware(
+	CORSMiddleware,
+	allow_origins=["*"],
+	allow_credentials=True,
+	allow_methods=["*"],
+	allow_headers=["*"],
+)
+
+# =========================
+# MODELOS
+# =========================
+class DeviceIn(BaseModel):
+
+	hostname: str
+	ip: str
+
+	mac: Optional[str] = None
+	os: Optional[str] = None
+
+	cpu_percent: Optional[float] = None
+	mem_percent: Optional[float] = None
+	disk_percent: Optional[float] = None
+
+# =========================
+# PROGRAMAS DISPONIBLES
+# =========================
+PROGRAMAS_DISPONIBLES = [
+
+	{
+    	"nombre": "Firefox",
+    	"archivo": "http://192.168.0.97:9090/mozilla-firefox-150-0.exe",
+    	"version": "Última",
+    	"categoria": "Navegador"
+	},
+
+	{
+    	"nombre": "visual Studio Code",
+    	"archivo": "http://192.168.0.97:9090/VSCodeSetup-x64-1.121.0.exe",
+    	"version": "Última",
+    	"categoria": "Navegador"
+	},
+
+	{
+    	"nombre": "Brave",
+    	"archivo": "http://192.168.0.97:9090/BraveBrowserSetup-BRV015.exe",
+    	"version": "Última",
+    	"categoria": "Multimedia"
+	},
+
+	{
+    	"nombre": "Google Chrome",
+    	"archivo": "http://192.168.0.97:9090/ChromeSetup.exe",
+    	"version": "Última",
+    	"categoria": "Compresión"
+	},
+
+	{
+    	"nombre": "AnyDesk",
+    	"archivo": "AnyDesk.exe",
+    	"version": "Última",
+    	"categoria": "Remoto"
+	},
+
+	{
+    	"nombre": "TeamViewer",
+    	"archivo": "TeamViewer.exe",
+    	"version": "Última",
+    	"categoria": "Remoto"
+	}
+
+]
+
+# =========================
+# HEALTH
+# =========================
+@app.get("/health")
+def health():
+
+	with engine.begin() as conn:
+    	conn.execute(text("SELECT 1"))
+
+	return {
+    	"ok": True
+	}
+
+# =========================
+# CLASIFICAR DISPOSITIVO
+# =========================
+def clasificar_dispositivo(ip: str) -> str:
+
+	try:
+
+    	ip_obj = ipaddress.ip_address(ip)
+
+    	if ip_obj == ipaddress.ip_address("192.168.0.1"):
+        	return "Router"
+
+    	elif (
+        	ipaddress.ip_address("192.168.0.100")
+        	<= ip_obj
+        	<= ipaddress.ip_address("192.168.0.150")
+    	):
+        	return "Android"
+
+    	else:
+        	return "Ordenador"
+
+	except ValueError:
+
+    	return "Desconocido"
+
+# =========================
+# REGISTRAR DISPOSITIVO
+# =========================
+@app.post("/register")
+def register_device(payload: DeviceIn):
+
+	tipo = clasificar_dispositivo(payload.ip)
+
+	with engine.begin() as conn:
+
+    	row = conn.execute(
+        	text("""
+            	SELECT id
+            	FROM devices
+            	WHERE ip=:ip
+        	"""),
+        	{
+            	"ip": payload.ip
+        	}
+    	).fetchone()
+
+    	# =========================
+    	# SI EXISTE -> UPDATE
+    	# =========================
+    	if row:
+
+        	device_id = row[0]
+
+        	conn.execute(text("""
+            	UPDATE devices
+            	SET
+                	hostname=:h,
+                	mac=:m,
+                	os=COALESCE(:o, os),
+                	tipo_dispositivo=:t,
+                	last_seen=NOW()
+            	WHERE id=:id
+        	"""), {
+            	"h": payload.hostname,
+            	"m": payload.mac,
+            	"o": payload.os,
+            	"t": tipo,
+            	"id": device_id
+        	})
+
+    	# =========================
+    	# SI NO EXISTE -> INSERT
+    	# =========================
+    	else:
+
+        	res = conn.execute(text("""
+            	INSERT INTO devices(
+                	hostname,
+                	ip,
+                	mac,
+                	os,
+                	tipo_dispositivo,
+                	last_seen
+            	)
+            	VALUES(
+                	:h,
+                	:ip,
+                	:m,
+                	:o,
+                	:t,
+                	NOW()
+            	)
+        	"""), {
+            	"h": payload.hostname,
+            	"ip": payload.ip,
+            	"m": payload.mac,
+            	"o": payload.os,
+            	"t": tipo
+        	})
+
+       	device_id = res.lastrowid
+
+    	# =========================
+    	# MÉTRICAS
+    	# =========================
+    	if payload.cpu_percent is not None:
+
+        	conn.execute(text("""
+            	INSERT INTO metrics(
+                	device_id,
+                	cpu_percent,
+                	mem_percent,
+                	disk_percent
+            	)
+            	VALUES(
+                	:did,
+                	:cpu,
+                	:mem,
+                	:disk
+            	)
+        	"""), {
+            	"did": device_id,
+            	"cpu": payload.cpu_percent,
+            	"mem": payload.mem_percent,
+            	"disk": payload.disk_percent
+        	})
+
+	return {
+    	"status": "ok",
+    	"device_id": device_id,
+    	"tipo_dispositivo": tipo
+	}
+
+# =========================
+# LISTAR DISPOSITIVOS
+# =========================
+@app.get("/devices")
+def list_devices():
+
+	with engine.begin() as conn:
+
+    	rows = conn.execute(text("""
+        	SELECT
+            	id,
+            	hostname,
+            	ip,
+            	mac,
+            	os,
+            	last_seen,
+            	tipo_dispositivo
+        	FROM devices
+        	ORDER BY last_seen DESC
+    	""")).mappings().all()
+
+	return list(rows)
+
+# =========================
+# INVENTARIO SOFTWARE
+# =========================
+@app.post("/inventory/software")
+def push_software(
+	payload: Dict[str, Any],
+	request: Request,
+	_=Depends(lambda: None)
+):
+
+	try:
+
+    	ip = payload.get("ip")
+
+    	hostname = (
+        	payload.get("hostname") or ""
+    	).strip()
+
+    	os_name = payload.get("os")
+
+    	items: List[Dict[str, Any]] = (
+        	payload.get("items") or []
+    	)
+
+    	# =========================
+    	# FALLBACK IP
+    	# =========================
+    	if not isinstance(ip, str) or not ip.strip():
+
+        	xf = request.headers.get(
+            	"x-forwarded-for"
+        	)
+
+        	if xf:
+            	ip = xf.split(",")[0].strip()
+        	else:
+            	ip = request.client.host
+
+    	if not hostname:
+        	hostname = ip or "unknown"
+
+    	tipo = clasificar_dispositivo(ip)
+
+    	with engine.begin() as conn:
+
+        	# =========================
+        	# BUSCAR DISPOSITIVO
+        	# =========================
+        	row = conn.execute(
+            	text("""
+                	SELECT id
+                	FROM devices
+                	WHERE ip=:ip
+            	"""),
+            	{
+                	"ip": ip
+            	}
+        	).fetchone()
+
+        	# =========================
+        	# UPDATE
+        	# =========================
+        	if row:
+
+            	device_id = row[0]
+
+            	conn.execute(text("""
+                	UPDATE devices
+                	SET
+                    	hostname=:h,
+                    	os=COALESCE(:o, os),
+                    	tipo_dispositivo=:t,
+                    	last_seen=NOW()
+                	WHERE id=:id
+            	"""), {
+                	"h": hostname,
+                	"o": os_name,
+                	"t": tipo,
+                	"id": device_id
+            	})
+
+        	# =========================
+        	# INSERT
+        	# =========================
+        	else:
+
+            	res = conn.execute(text("""
+                	INSERT INTO devices(
+                    	hostname,
+                    	ip,
+                    	os,
+                    	tipo_dispositivo,
+                   	last_seen
+                	)
+                	VALUES(
+                    	:h,
+                    	:ip,
+                    	:o,
+                    	:t,
+                    	NOW()
+                	)
+            	"""), {
+                	"h": hostname,
+                	"ip": ip,
+                	"o": os_name,
+                	"t": tipo
+            	})
+
+            	device_id = res.lastrowid
+
+        	# =========================
+        	# LIMPIAR INVENTARIO
+        	# =========================
+        	conn.execute(
+            	text("""
+                	DELETE FROM software
+                	WHERE device_id=:did
+            	"""),
+            	{
+                	"did": device_id
+            	}
+        	)
+
+        	# =========================
+        	# INSERTAR PROGRAMAS
+        	# =========================
+        	for it in items:
+
+            	name = str(
+                	it.get("name") or ""
+            	).strip()
+
+            	if not name:
+                	continue
+
+            	if "ping" in name.lower():
+                	continue
+
+            	conn.execute(text("""
+                	INSERT INTO software(
+                    	device_id,
+                    	name,
+                    	version,
+                    	publisher,
+                    	install_date,
+                    	collected_at
+                	)
+                	VALUES(
+                    	:did,
+                    	:n,
+                    	:v,
+                    	:p,
+                    	:d,
+                    	NOW()
+                	)
+            	"""), {
+                	"did": device_id,
+                	"n": name[:255],
+                	"v": (
+                    	it.get("version") or ""
+                	)[:120],
+                	"p": (
+                    	it.get("publisher") or ""
+                	)[:255],
+                	"d": (
+                    	it.get("install_date") or ""
+               	)[:32]
+            	})
+
+    	return {
+        	"status": "ok",
+        	"device_ip": ip,
+        	"count": len([
+            	x for x in items
+            	if x.get("name")
+        	]),
+        	"tipo_dispositivo": tipo
+    	}
+
+	except Exception as e:
+
+    	return {
+        	"status": "error",
+        	"message": str(e)
+    	}
+
+# =========================
+# SOFTWARE POR DISPOSITIVO
+# =========================
+@app.get("/software/{device_id}")
+def software_by_device(device_id: int):
+
+	try:
+
+    	with engine.begin() as conn:
+
+        	rows = conn.execute(text("""
+            	SELECT
+                	id,
+                	device_id,
+                	name,
+                	version,
+                	publisher,
+
+                	install_date,
+                	collected_at
+            	FROM software
+            	WHERE device_id = :did
+            	ORDER BY name
+            	LIMIT 500
+        	"""), {
+            	"did": device_id
+        	}).mappings().all()
+
+    	return [dict(row) for row in rows]
+
+	except Exception as e:
+
+    	return {
+        	"error": str(e),
+        	"device_id": device_id
+    	}
+
+# =========================
+# PROGRAMAS DISPONIBLES
+# =========================
+@app.get("/programas")
+def obtener_programas():
+
+	return {
+    	"programas": PROGRAMAS_DISPONIBLES
+	}
+
+# =========================
+# CREAR ACCIÓN
+# =========================
+@app.post("/acciones")
+def crear_accion(payload: Dict[str, Any]):
+
+	device_id = payload.get("device_id")
+	programa = payload.get("programa")
+          accion = payload.get("accion")
+	ruta_instalador = payload.get(
+    	"ruta_instalador",
+    	""
+	)
+
+	# =========================
+	# VALIDACIONES
+	# =========================
+	if not device_id:
+
+    	return {
+        	"status": "error",
+        	"message": "Falta device_id"
+    	}
+
+	if not programa:
+
+    	return {
+        	"status": "error",
+        	"message": "Falta programa"
+    	}
+
+	if accion not in [
+    	"instalar",
+    	"desinstalar"
+	]:
+
+    	return {
+        	"status": "error",
+        	"message": "Acción inválida"
+    	}
+
+	with engine.begin() as conn:
+
+    	res = conn.execute(text("""
+        	INSERT INTO acciones_pendientes(
+           	device_id,
+            	programa,
+            	accion,
+            	estado,
+            	ruta_instalador,
+            	fecha
+        	)
+        	VALUES(
+            	:did,
+            	:prog,
+            	:acc,
+            	'pendiente',
+            	:ruta,
+            	NOW()
+        	)
+    	"""), {
+        	"did": device_id,
+        	"prog": programa,
+        	"acc": accion,
+        	"ruta": ruta_instalador
+    	})
+
+    	accion_id = res.lastrowid
+
+	return {
+    	"status": "ok",
+    	"accion_id": accion_id,
+    	"accion": accion,
+    	"programa": programa
+	}
+
+# =========================
+# ACCIONES PENDIENTES
+# =========================
+@app.get("/acciones/{device_id}")
+def obtener_acciones(device_id: int):
+
+	with engine.begin() as conn:
+
+    	rows = conn.execute(text("""
+        	SELECT
+            	id,
+            	device_id,
+            	programa,
+            	accion,
+            	estado,
+            	ruta_instalador,
+            	fecha
+        	FROM acciones_pendientes
+        	WHERE device_id = :did
+        	AND estado = 'pendiente'
+        	ORDER BY fecha ASC
+    	"""), {
+        	"did": device_id
+    	}).mappings().all()
+
+	return {
+    	"acciones": list(rows)
+	}
+
+# =========================
+# HISTORIAL ACCIONES
+# =========================
+@app.get("/historial/{device_id}")
+def historial_acciones(device_id: int):
+
+	with engine.begin() as conn:
+
+    	rows = conn.execute(text("""
+        	SELECT
+            	id,
+            	programa,
+            	accion,
+            	estado,
+            	fecha,
+            	updated_at
+        	FROM acciones_pendientes
+        	WHERE device_id = :did
+        	ORDER BY fecha DESC
+        	LIMIT 100
+    	"""), {
+        	"did": device_id
+    	}).mappings().all()
+
+	return list(rows)
+
+# =========================
+# ACTUALIZAR ESTADO
+# =========================
+@app.post("/acciones/{accion_id}/estado")
+def actualizar_estado(
+	accion_id: int,
+	payload: Dict[str, Any]
+):
+
+	nuevo_estado = payload.get(
+    	"estado",
+    	"pendiente"
+	)
+
+	with engine.begin() as conn:
+
+    	conn.execute(text("""
+        	UPDATE acciones_pendientes
+        	SET
+            	estado = :estado,
+            	updated_at = NOW()
+        	WHERE id = :id
+    	"""), {
+        	"estado": nuevo_estado,
+        	"id": accion_id
+    	})
+
+	return {
+    	"status": "ok",
+    	"accion_id": accion_id,
+    	"nuevo_estado": nuevo_estado
+	}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

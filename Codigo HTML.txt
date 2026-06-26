@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Laboratorio Virtual</title>
+
+<style>
+
+*{
+  margin:0;
+  padding:0;
+  box-sizing:border-box;
+}
+
+body{
+  font-family:Arial,sans-serif;
+  background:#eef2f7;
+}
+
+.header{
+  background:#1e293b;
+  color:white;
+  padding:20px;
+  text-align:center;
+}
+
+.container{
+  width:95%;
+  margin:20px auto;
+}
+
+.tabs{
+  display:flex;
+  gap:10px;
+  margin-bottom:20px;
+}
+.tab{
+  padding:12px 20px;
+  background:#dbe4ee;
+  border-radius:10px;
+  cursor:pointer;
+  font-weight:bold;
+  transition:.2s;
+}
+
+.tab:hover{
+  background:#cbd5e1;
+}
+
+.tab.active{
+  background:#1e293b;
+  color:white;
+}
+
+.device-grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+  gap:20px;
+}
+
+.device-card{
+  background:white;
+  border-radius:15px;
+  padding:20px;
+  border-left:8px solid #2563eb;
+  cursor:pointer;
+}
+
+.device-card:hover{
+  transform:translateY(-3px);
+}
+
+.status{
+
+  padding:6px 10px;
+  border-radius:20px;
+  font-size:12px;
+  font-weight:bold;
+}
+
+.online{
+  background:#dcfce7;
+  color:#166534;
+}
+
+.offline{
+  background:#fee2e2;
+  color:#991b1b;
+}
+
+.device-info{
+  margin:8px 0;
+}
+
+#software-panel{
+  display:none;
+  background:white;
+  padding:25px;
+  border-radius:15px;
+  margin-top:25px;
+}
+
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:10px;
+}
+
+th{
+  background:#1e293b;
+  color:white;
+
+  padding:12px;
+}
+
+td{
+  padding:12px;
+  border-bottom:1px solid #ddd;
+}
+
+.btn{
+  border:none;
+  padding:8px 12px;
+  border-radius:8px;
+  cursor:pointer;
+}
+
+.btn-install{
+  background:#16a34a;
+  color:white;
+}
+
+.btn-remove{
+  background:#dc2626;
+  color:white;
+}
+
+.btn-history{
+  background:#2563eb;
+  color:white;
+  margin-top:12px;
+  width:100%;
+}
+
+.section-title{
+  font-size:22px;
+  margin-top:25px;
+}
+
+#selectorEquipos,
+#historialPanel{
+  display:none;
+  position:fixed;
+  top:15%;
+  left:50%;
+  transform:translateX(-50%);
+  background:white;
+  width:520px;
+  padding:25px;
+  border-radius:15px;
+  box-shadow:0 10px 30px rgba(0,0,0,.2);
+  z-index:999;
+  max-height:70vh;
+  overflow:auto;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="header">
+<h1>Laboratorio Virtual</h1>
+<p>Panel de administración y despliegue de software</p>
+</div>
+
+<div class="container">
+
+<div class="tabs">
+
+<div class="tab active" onclick="cambiarTab('all',event)">Todos</div>
+
+<div class="tab" onclick="cambiarTab('lab1',event)">
+Laboratorio A
+</div>
+
+<div class="tab" onclick="cambiarTab('lab2',event)">
+Laboratorio B
+</div>
+
+<div class="tab" onclick="cambiarTab('lab3',event)">
+Laboratorio C
+</div>
+
+</div>
+
+<div id="device-grid" class="device-grid"></div>
+
+<div id="software-panel">
+
+<h2 id="panel-title"></h2>
+
+<div class="section-title">
+Programas disponibles para instalar
+</div>
+
+<table>
+<thead>
+<tr>
+<th>Programa</th>
+<th>Acción</th>
+</tr>
+</thead>
+
+<tbody>
+
+<tr>
+<td>Mozilla Firefox</td>
+<td>
+<button class="btn btn-install"
+onclick="abrirSelector('Firefox','http://192.168.0.97:9090/mozilla-firefox-150-0.exe')">
+Instalar
+</button>
+</td>
+</tr>
+
+<tr>
+<td>Google Chrome</td>
+<td>
+<button class="btn btn-install"
+onclick="abrirSelector('Chrome','http://192.168.0.97:9090/ChromeSetup.exe')">
+Instalar
+</button>
+</td>
+</tr>
+
+<tr>
+<td>Visual Studio Code</td>
+<td>
+<button class="btn btn-install"
+onclick="abrirSelector('VSC','http://192.168.0.97:9090/VSCodeSetup-x64-1.121.0.exe')">
+Instalar
+</button>
+</td>
+</tr>
+
+<tr>
+<td>Brave</td>
+<td>
+<button class="btn btn-install"
+onclick="abrirSelector('Brave','http://192.168.0.97:9090/BraveBrowserSetup-BRV015.exe')">
+Instalar
+</button>
+</td>
+</tr>
+
+</tbody>
+</table>
+
+<div class="section-title">
+Programas instalados
+</div>
+
+<table>
+
+<thead>
+<tr>
+<th>Programa</th>
+<th>Versión</th>
+<th>Acción</th>
+</tr>
+</thead>
+
+<tbody id="installed-software"></tbody>
+
+</table>
+
+</div>
+
+<div id="selectorEquipos">
+
+<h3>Selecciona equipos online</h3>
+
+<div id="listaEquipos"></div>
+
+<br>
+
+<button class="btn btn-install"
+onclick="instalarSeleccionados()">
+Instalar
+</button>
+
+<button class="btn"
+onclick="cerrarSelector()">
+Cancelar
+</button>
+
+</div>
+
+<div id="historialPanel">
+
+<h3>Historial del equipo</h3>
+
+<div id="historialContenido"></div>
+
+<br>
+
+<button class="btn"
+onclick="cerrarHistorial()">
+Cerrar
+</button>
+
+</div>
+
+</div>
+
+<script>
+
+let devices=[];
+let currentTab="all";
+let programaPendiente=null;
+let rutaPendiente=null;
+
+async function loadDevices(){
+
+ const response=
+ await fetch("http://192.168.0.97:8000/devices");
+
+ devices=
+ await response.json();
+
+ renderDevices();
+
+}
+
+function cambiarTab(tab,event){
+
+ currentTab=tab;
+
+ document
+ .querySelectorAll(".tab")
+ .forEach(t=>t.classList.remove("active"));
+
+ event.target.classList.add("active");
+
+ renderDevices();
+
+}
+
+function renderDevices(){
+
+ const grid=
+ document.getElementById("device-grid");
+
+ grid.innerHTML="";
+
+ const online=
+ devices.filter(d=>d.os);
+
+ let lista=[];
+
+ if(currentTab==="all"){
+   lista=devices;
+ }
+
+ if(currentTab==="lab1"){
+   lista=online.slice(0,2);
+ }
+
+ if(currentTab==="lab2"){
+   lista=online.slice(2,3);
+ }
+
+if(currentTab==="lab3"){
+   lista=online.slice(3,4);
+ }
+
+ lista.forEach(device=>{
+
+ const isOnline=device.os!==null;
+
+ const card=document.createElement("div");
+
+ card.className="device-card";
+
+ card.innerHTML=`
+
+ <div><strong>${device.hostname||"Sin nombre"}</strong></div>
+
+ <div class="status ${isOnline?"online":"offline"}">
+ ${isOnline?"ONLINE":"OFFLINE"}
+ </div>
+
+ <div class="device-info">
+ ID: ${device.id}
+ </div>
+
+ <div class="device-info">
+ IP: ${device.ip}
+ </div>
+
+ <div class="device-info">
+ Sistema:
+ ${device.os||"No disponible"}
+ </div>
+
+ <div class="device-info">
+ Tipo:
+ ${device.tipo_dispositivo||"N/A"}
+ </div>
+
+ <div class="device-info">
+ Última conexión:
+ <br>
+ ${device.last_seen||"N/A"}
+ </div>
+
+ <button
+ class="btn btn-history"
+ onclick="event.stopPropagation();verHistorial(${device.id})">
+ Ver historial
+ </button>
+
+ `;
+
+ card.onclick=()=>loadSoftware(
+ device.id,
+ device.hostname
+ );
+
+ grid.appendChild(card);
+
+ });
+
+}
+
+async function loadSoftware(id,nombre){
+
+ document.getElementById(
+ "software-panel"
+ ).style.display="block";
+
+ document.getElementById(
+ "panel-title"
+ ).textContent=
+ "Administrar equipo: "+nombre;
+
+ const response=
+
+await fetch(
+ `http://192.168.0.97:8000/software/${id}`
+ );
+
+ const software=
+ await response.json();
+
+ const tbody=
+ document.getElementById(
+ "installed-software"
+ );
+
+ tbody.innerHTML="";
+
+ software.forEach(p=>{
+
+ tbody.innerHTML+=`
+
+ <tr>
+ <td>${p.name||"N/A"}</td>
+ <td>${p.version||"N/A"}</td>
+
+ <td>
+
+ <button
+ class="btn btn-remove"
+ onclick="desinstalarPrograma(
+ ${p.device_id},
+ '${(p.name||"").replace(/'/g,"\\'")}'
+ )">
+
+ Desinstalar
+
+ </button>
+
+ </td>
+
+ </tr>
+
+ `;
+
+ });
+
+}
+
+function abrirSelector(programa,ruta){
+
+ programaPendiente=programa;
+ rutaPendiente=ruta;
+
+ const online=
+ devices.filter(d=>d.os);
+
+ const lista=
+ document.getElementById("listaEquipos");
+
+ lista.innerHTML="";
+
+ online.forEach(d=>{
+
+ lista.innerHTML+=`
+
+ <div>
+ <label>
+ <input type="checkbox" value="${d.id}">
+ ${d.hostname} (${d.ip})
+ </label>
+ </div>
+
+ `;
+
+ });
+
+ document.getElementById(
+
+ "selectorEquipos"
+ ).style.display="block";
+
+}
+
+function cerrarSelector(){
+
+ document.getElementById(
+ "selectorEquipos"
+ ).style.display="none";
+
+}
+
+async function instalarSeleccionados(){
+
+ const checks=
+ document.querySelectorAll(
+ "#listaEquipos input:checked"
+ );
+
+ for(const c of checks){
+
+ await fetch(
+ "http://192.168.0.97:8000/acciones",
+ {
+ method:"POST",
+ headers:{
+ "Content-Type":"application/json"
+ },
+ body:JSON.stringify({
+ device_id:Number(c.value),
+ accion:"instalar",
+ programa:programaPendiente,
+ ruta_instalador:rutaPendiente
+ })
+ });
+
+ }
+
+ cerrarSelector();
+
+ alert("Solicitud enviada");
+
+}
+
+async function desinstalarPrograma(
+ deviceId,
+ programa
+){
+
+ const confirmar=
+ confirm(
+ `¿Seguro que deseas desinstalar "${programa}"?`
+ );
+
+ if(!confirmar){
+   return;
+ }
+
+ await fetch(
+ "http://192.168.0.97:8000/acciones",
+ {
+ method:"POST",
+ headers:{
+ "Content-Type":"application/json"
+ },
+ body:JSON.stringify({
+ device_id:Number(deviceId),
+ accion:"desinstalar",
+ programa:programa,
+ ruta_instalador:""
+ })
+ });
+
+ alert("Solicitud de desinstalación enviada");
+
+}
+
+async function verHistorial(deviceId){
+
+ const panel=
+ document.getElementById("historialPanel");
+
+ const contenido=
+ document.getElementById("historialContenido");
+
+ contenido.innerHTML="Cargando historial...";
+
+ panel.style.display="block";
+
+ try{
+
+   const response=
+   await fetch(
+   `http://192.168.0.97:8000/historial/${deviceId}`
+   );
+
+   const historial=
+   await response.json();
+
+   if(!historial.length){
+
+ 	contenido.innerHTML=
+ 	"Sin historial registrado.";
+
+ 	return;
+   }
+
+   contenido.innerHTML=
+   historial.map(h=>`
+
+   <div style="margin-bottom:10px;border-bottom:1px solid #ddd;padding-bottom:8px;">
+
+   <strong>${h.accion}</strong>
+   - ${h.programa}
+
+   <br>
+
+   ${h.fecha}
+
+   </div>
+
+   `).join("");
+
+ }catch{
+
+   contenido.innerHTML=
+   "No fue posible cargar el historial.";
+
+ }
+
+}
+
+function cerrarHistorial(){
+
+ document.getElementById(
+ "historialPanel"
+ ).style.display="none";
+
+}
+
+loadDevices();
+
+setInterval(loadDevices,30000);
+
+</script>
+
+</body>
+
+</html>
+
+
+
+
+
+
+
+
+
+

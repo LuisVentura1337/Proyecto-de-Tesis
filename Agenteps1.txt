@@ -1,0 +1,413 @@
+# =========================================================
+# AGENTE POWERSHELL
+# MONITOREO + INVENTARIO + INSTALACION REMOTA
+# =========================================================
+
+$ErrorActionPreference = "SilentlyContinue"
+
+if (!(Test-Path "C:\Agente")) {
+    New-Item -ItemType Directory -Path "C:\Agente" | Out-Null
+}
+
+Start-Transcript `
+    -Path "C:\Agente\agente.log" `
+    -Append `
+    -Force
+
+$backendUrl = "http://192.168.0.97:8000"
+$deviceId = 56
+
+# =========================================================
+# OBTENER IP
+# =========================================================
+
+function Obtener-IP {
+
+    try {
+
+        return (
+            Get-NetIPAddress -AddressFamily IPv4 |
+            Where-Object {
+                $_.IPAddress -notlike "169.*" -and
+                $_.IPAddress -ne "127.0.0.1"
+            } |
+            Select-Object -First 1 -ExpandProperty IPAddress
+        )
+
+    } catch {
+
+        return "0.0.0.0"
+    }
+}
+
+# =========================================================
+# REPORTAR ESTADO
+# =========================================================
+
+function Reportar-Estado {
+
+    param (
+        [int]$accionId,
+        [string]$estado
+    )
+
+    try {
+
+        $payload = @{ estado = $estado }
+
+        Invoke-RestMethod `
+            -Uri "$backendUrl/acciones/$accionId/estado" `
+            -Method POST `
+            -Body ($payload | ConvertTo-Json -Compress) `
+            -ContentType "application/json"
+
+    } catch {}
+}
+
+# =========================================================
+# INVENTARIO
+# =========================================================
+
+function Obtener-Inventario {
+
+    $items = @()
+    $nombres = @{}
+
+    $regPaths = @(
+        "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+        "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+    )
+
+    foreach ($path in $regPaths) {
+
+        if (Test-Path $path) {
+
+            Get-ChildItem $path | ForEach-Object {
+
+                try {
+
+                    $p = Get-ItemProperty $_.PSPath
+                    $nombre = "$($p.DisplayName)".Trim()
+
+                    if ([string]::IsNullOrWhiteSpace($nombre)) { return }
+
+                    if (
+                        $nombre -match "^Update" -or
+                        $nombre -match "^Security Update" -or
+                        $nombre -match "^KB[0-9]+" -or
+                        $nombre -match "Redistributable" -or
+                        $nombre -match "Runtime" -or
+                        $nombre -match "Driver" -or
+                        $nombre -match "Language Pack" -or
+                        $nombre -match "Visual C" -or
+                        $nombre -match "Edge WebView2"
+                    ) { return }
+
+                    if ($nombres.ContainsKey($nombre)) { return }
+
+                    $nombres[$nombre] = $true
+
+                    $items += [PSCustomObject]@{
+                        name         = "$($p.DisplayName)"
+                        version      = "$($p.DisplayVersion)"
+                        publisher    = "$($p.Publisher)"
+                        install_date = "$($p.InstallDate)"
+                    }
+
+                } catch {}
+            }
+        }
+    }
+
+    return $items | Sort-Object name
+}
+
+# =========================================================
+# ENVIAR INVENTARIO
+# =========================================================
+
+function Enviar-Inventario {
+
+    try {
+
+        $payload = [PSCustomObject]@{
+            ip       = "$(Obtener-IP)"
+            hostname = "$env:COMPUTERNAME"
+            os       = "$((Get-CimInstance Win32_OperatingSystem).Caption)"
+            items    = (Obtener-Inventario)
+        }
+
+        $json = $payload | ConvertTo-Json -Depth 10 -Compress
+        $utf8 = [System.Text.Encoding]::UTF8.GetBytes($json)
+
+        Invoke-RestMethod `
+            -Uri "$backendUrl/inventory/software" `
+            -Method POST `
+            -Body $utf8 `
+            -ContentType "application/json; charset=utf-8"
+
+    } catch {}
+}
+
+# =========================================================
+# INSTALAR
+# =========================================================
+
+function Instalar-Programa {
+
+    param ($accion)
+
+    try {
+
+        $ruta = $accion.ruta_instalador
+
+        if ([string]::IsNullOrWhiteSpace($ruta)) {
+            Reportar-Estado $accion.id "error"
+            return
+        }
+
+        $nombreArchivo = Split-Path $ruta -Leaf
+        $tempFile = "C:\Agente\$nombreArchivo"
+
+        if (Test-Path $tempFile) {
+            Remove-Item $tempFile -Force -ErrorAction SilentlyContinue
+        }
+
+        Write-Output "Descargando:"
+        Write-Output $ruta
+
+        Invoke-WebRequest `
+            -Uri $ruta `
+            -OutFile $tempFile `
+            -UseBasicParsing
+
+        if (!(Test-Path $tempFile)) {
+            Reportar-Estado $accion.id "error"
+            return
+        }
+
+        $nombre = $nombreArchivo.ToLower()
+        $extension = [System.IO.Path]::GetExtension($tempFile).ToLower()
+
+        # =========================================
+        # VISUAL STUDIO CODE
+        # =========================================
+
+        if ($nombre -match "vscode") {
+
+            Write-Output "Instalando VS Code..."
+
+            Stop-Process `
+                -Name "Code" `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+            Start-Sleep -Seconds 2
+
+            # EXACTAMENTE como te funcionó manual
+            Start-Process `
+                -FilePath $tempFile
+
+            Start-Sleep -Seconds 20
+
+            $timeout = 180
+            $elapsed = 0
+
+            while ($elapsed -lt $timeout) {
+
+                if (
+                    (Test-Path "C:\Program Files\Microsoft VS Code") -or
+                    (Test-Path "$env:LOCALAPPDATA\Programs\Microsoft VS Code")
+                ) {
+
+                    Enviar-Inventario
+                    Reportar-Estado $accion.id "completado"
+                    return
+                }
+
+                Start-Sleep -Seconds 5
+                $elapsed += 5
+            }
+
+            Reportar-Estado $accion.id "error"
+            return
+        }
+
+        # =========================================
+        # MSI
+        # =========================================
+
+        elseif ($extension -eq ".msi") {
+
+            Start-Process `
+                -FilePath "msiexec.exe" `
+                -ArgumentList "/i `"$tempFile`" /qn /norestart" `
+                -Wait
+        }
+
+        # =========================================
+        # NORMAL
+        # =========================================
+
+        else {
+
+            Start-Process `
+                -FilePath $tempFile `
+                -ArgumentList "/S" `
+                -Wait
+        }
+
+        Start-Sleep -Seconds 10
+
+        Enviar-Inventario
+        Reportar-Estado $accion.id "completado"
+
+    } catch {
+
+        Reportar-Estado $accion.id "error"
+    }
+}
+
+# =========================================================
+# DESINSTALAR
+# =========================================================
+
+function Desinstalar-Programa {
+
+    param ($accion)
+
+    try {
+
+        $target = $accion.programa.ToLower()
+
+        $paths = @(
+            "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"
+        )
+
+        foreach ($path in $paths) {
+
+            Get-ChildItem $path | ForEach-Object {
+
+                try {
+
+                    $p = Get-ItemProperty $_.PSPath
+
+                    if (
+                        $p.DisplayName -and
+                        $p.DisplayName.ToLower() -like "*$target*"
+                    ) {
+
+                        if ($p.DisplayName -match "Visual Studio Code") {
+
+                            Stop-Process -Name "Code" -Force -ErrorAction SilentlyContinue
+
+                            $rutaVS = "C:\Program Files\Microsoft VS Code\unins000.exe"
+
+                            if (Test-Path $rutaVS) {
+
+                                Start-Process `
+                                    -FilePath $rutaVS `
+                                    -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-" `
+                                    -Wait
+                            }
+
+                            Remove-Item `
+                                "C:\Program Files\Microsoft VS Code" `
+                                -Recurse `
+                                -Force `
+                                -ErrorAction SilentlyContinue
+                        }
+
+                        elseif ($p.DisplayName -match "Mozilla Firefox") {
+
+                            $ff = $p.UninstallString
+
+                            if ($ff) {
+
+                                Start-Process `
+                                    -FilePath "cmd.exe" `
+                                    -ArgumentList "/c $ff -ms" `
+                                    -Wait
+                            }
+                        }
+
+                        else {
+
+                            $uninstall = $p.UninstallString
+
+                            if ($uninstall) {
+
+                                Start-Process `
+                                    -FilePath "cmd.exe" `
+                                    -ArgumentList "/c $uninstall" `
+                                    -Wait
+                            }
+                        }
+
+                        Start-Sleep -Seconds 10
+
+                        Enviar-Inventario
+                        Reportar-Estado $accion.id "completado"
+
+                        return
+                    }
+
+                } catch {}
+            }
+        }
+
+    } catch {
+
+        Reportar-Estado $accion.id "error"
+    }
+}
+
+# =========================================================
+# ACCIONES
+# =========================================================
+
+function Ejecutar-Accion {
+
+    param ($accion)
+
+    if ($accion.accion -eq "instalar") {
+        Instalar-Programa $accion
+    }
+
+    elseif ($accion.accion -eq "desinstalar") {
+        Desinstalar-Programa $accion
+    }
+}
+
+# =========================================================
+# LOOP
+# =========================================================
+
+try {
+
+    while ($true) {
+
+        try {
+
+            Write-Output "Consultando acciones..."
+
+            $resp = Invoke-RestMethod `
+                -Uri "$backendUrl/acciones/$deviceId"
+
+            foreach ($accion in $resp.acciones) {
+                Ejecutar-Accion $accion
+            }
+
+        } catch {}
+
+        Enviar-Inventario
+
+        Start-Sleep -Seconds 10
+    }
+
+} finally {
+
+    Stop-Transcript
+}
+
