@@ -7,6 +7,11 @@
 
 <style>
 
+
+/* ==============================
+   HOJA DE ESTILOS
+   ============================== */
+
 *{
   margin:0;
   padding:0;
@@ -170,11 +175,16 @@ td{
 
 <body>
 
+<!-- Cuerpo principal de la aplicación -->
+
+<!-- Encabezado del sistema -->
 <div class="header">
 <h1>Laboratorio Virtual</h1>
 <p>Panel de administración y despliegue de software</p>
 </div>
 
+
+<!-- Contenedor principal -->
 <div class="container">
 
 <div class="tabs">
@@ -317,11 +327,19 @@ Cerrar
 
 <script>
 
+
+// ==============================
+// VARIABLES GLOBALES Y FUNCIONES
+// ==============================
+
+// Almacena todos los dispositivos obtenidos desde la API.
 let devices=[];
+// Guarda la pestaña activa.
 let currentTab="all";
 let programaPendiente=null;
 let rutaPendiente=null;
 
+// Obtiene desde la API el listado de equipos registrados.
 async function loadDevices(){
 
  const response=
@@ -334,6 +352,7 @@ async function loadDevices(){
 
 }
 
+// Cambia el laboratorio seleccionado y actualiza la vista.
 function cambiarTab(tab,event){
 
  currentTab=tab;
@@ -348,6 +367,8 @@ function cambiarTab(tab,event){
 
 }
 
+
+// Genera dinámicamente las tarjetas de equipos.
 function renderDevices(){
 
  const grid=
@@ -435,6 +456,7 @@ if(currentTab==="lab3"){
 
 }
 
+// Consulta el software instalado del equipo seleccionado.
 async function loadSoftware(id,nombre){
 
  document.getElementById(
@@ -493,6 +515,7 @@ await fetch(
 
 }
 
+// Muestra la ventana para seleccionar equipos donde instalar.
 function abrirSelector(programa,ruta){
 
  programaPendiente=programa;
@@ -528,6 +551,8 @@ function abrirSelector(programa,ruta){
 
 }
 
+
+// Cierra la ventana de selección de equipos.
 function cerrarSelector(){
 
  document.getElementById(
@@ -536,6 +561,7 @@ function cerrarSelector(){
 
 }
 
+// Envía solicitudes de instalación al servidor.
 async function instalarSeleccionados(){
 
  const checks=
@@ -568,6 +594,7 @@ async function instalarSeleccionados(){
 
 }
 
+// Envía una solicitud de desinstalación.
 async function desinstalarPrograma(
  deviceId,
  programa
@@ -601,6 +628,7 @@ async function desinstalarPrograma(
 
 }
 
+// Consulta y muestra el historial del equipo.
 async function verHistorial(deviceId){
 
  const panel=
@@ -656,6 +684,7 @@ async function verHistorial(deviceId){
 
 }
 
+// Oculta la ventana del historial.
 function cerrarHistorial(){
 
  document.getElementById(
@@ -664,6 +693,7 @@ function cerrarHistorial(){
 
 }
 
+// Carga inicial de dispositivos.
 loadDevices();
 
 setInterval(loadDevices,30000);
