@@ -1,0 +1,9 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY ./api /app
+
+RUN pip install fastapi==0.119.0 uvicorn[standard] pydantic mysql-connector-python sqlalchemy
+
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,0 +1,65 @@
+version: "3.8"
+
+services:
+  mysql-home:
+	image: mysql:8.0
+	container_name: mysql-home
+	restart: unless-stopped
+	environment:
+  	MYSQL_ROOT_PASSWORD: "root123"
+  	MYSQL_DATABASE: "home_monitor"
+  	MYSQL_USER: "monitor"
+  	MYSQL_PASSWORD: "monitor_pass"
+	volumes:
+  	- mysql-data:/var/lib/mysql
+
+  api:
+	build: ./api
+	image: python:3.11-slim
+	container_name: home-api
+	restart: unless-stopped
+	depends_on:
+  	- mysql-home
+	working_dir: /app
+	volumes:
+  	- ./api:/app
+	ports:
+  	- "8000:8000"
+	environment:
+  	DB_HOST: mysql-home
+  	DB_NAME: home_monitor
+  	DB_USER: monitor
+  	DB_PASS: monitor_pass
+	command: >
+  	sh -c "pip install fastapi==0.119.0 'uvicorn[standard]' pydantic mysql-connector-python sqlalchemy &&
+         	uvicorn app:app --host 0.0.0.0 --port 8000"
+
+  scanner:
+	image: python:3.11-slim
+	container_name: home-scanner
+	restart: unless-stopped
+	depends_on:
+  	- api
+	working_dir: /app
+	volumes:
+  	- ./scanner:/app
+	environment:
+  	API_URL: "http://home-api:8000"
+  	NETWORK: "192.168.0.97/24"
+  	SCAN_INTERVAL: "300"
+	command: >
+  	sh -c "apt-get update && apt-get install -y nmap &&
+         	pip install python-nmap requests &&
+         	python scanner.py"
+
+  dashboard:
+	image: nginx:alpine
+	container_name: home-dashboard
+	restart: unless-stopped
+	volumes:
+  	- ./dashboard/static:/usr/share/nginx/html
+	ports:
+  	- "8080:80"
+
+volumes:
+  mysql-data:
